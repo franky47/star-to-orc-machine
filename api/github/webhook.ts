@@ -1,49 +1,43 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { z } from 'zod'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { env } from '../../src/env.js'
+import { verifySignature, readRawBody } from '../../src/crypto.js'
 
-export const TARGET_URL =
-  process.env.TARGET_URL ?? 'https://project-review-api.vercel.app/projects'
+// ---------------------------------------------------------------------------
+// Schemas
+// ---------------------------------------------------------------------------
 
-/** Verify the X-Hub-Signature-256 header against the raw payload. */
-export function verifySignature(
-  rawBody: Buffer,
-  signature: string,
-  secret: string,
-): boolean {
-  if (!signature.startsWith('sha256=')) return false
-  const hmac = createHmac('sha256', secret)
-  hmac.update(rawBody)
-  const expected = `sha256=${hmac.digest('hex')}`
-  try {
-    return timingSafeEqual(Buffer.from(expected), Buffer.from(signature))
-  } catch {
-    return false
-  }
-}
+const KnownEvent = z.union([
+  z.literal('star'),
+  z.literal('installation'),
+  z.literal('installation_repositories'),
+])
 
-/** Read the full request body as a Buffer. */
-export function readRawBody(req: IncomingMessage): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    req.on('data', (chunk: Buffer) => chunks.push(chunk))
-    req.on('end', () => resolve(Buffer.concat(chunks)))
-    req.on('error', reject)
-  })
-}
+const WebhookHeaders = z.object({
+  'x-hub-signature-256': z.string(),
+  'x-github-event': z.string(),
+})
 
-export interface StarPayload {
-  action: string
-  repository: {
-    full_name: string
-    html_url: string
-    description: string | null
-  }
-}
+const StarCreatedPayload = z.object({
+  action: z.literal('created'),
+  repository: z.object({
+    full_name: z.string(),
+    html_url: z.string(),
+    description: z.string().nullable(),
+  }),
+})
 
-/** Vercel serverless handler – disable default body parsing so we get raw bytes. */
+// ---------------------------------------------------------------------------
+// Vercel config – disable default body parsing so we get raw bytes.
+// ---------------------------------------------------------------------------
+
 export const config = {
   api: { bodyParser: false },
 }
+
+// ---------------------------------------------------------------------------
+// Handler
+// ---------------------------------------------------------------------------
 
 export default async function handler(
   req: IncomingMessage,
@@ -55,54 +49,67 @@ export default async function handler(
     return
   }
 
-  const secret = process.env.GITHUB_WEBHOOK_SECRET ?? ''
-  const signature = (req.headers['x-hub-signature-256'] as string) ?? ''
-  const event = (req.headers['x-github-event'] as string) ?? ''
+  const headersParsed = WebhookHeaders.safeParse(req.headers)
+  if (!headersParsed.success) {
+    res.writeHead(400, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Missing required headers' }))
+    return
+  }
+
+  const { 'x-hub-signature-256': signature, 'x-github-event': eventHeader } =
+    headersParsed.data
 
   const rawBody = await readRawBody(req)
 
-  if (!verifySignature(rawBody, signature, secret)) {
+  if (!verifySignature(rawBody, signature, env.GITHUB_WEBHOOK_SECRET)) {
     res.writeHead(401, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ error: 'Invalid signature' }))
     return
   }
 
   // GitHub App lifecycle events – acknowledge but take no action.
-  if (event === 'installation' || event === 'installation_repositories') {
+  const eventParsed = KnownEvent.safeParse(eventHeader)
+  if (
+    eventParsed.success &&
+    (eventParsed.data === 'installation' ||
+      eventParsed.data === 'installation_repositories')
+  ) {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ message: 'Installation event received' }))
     return
   }
 
-  if (event !== 'star') {
+  if (!eventParsed.success || eventParsed.data !== 'star') {
     res.writeHead(202, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ message: 'Event ignored' }))
     return
   }
 
-  let payload: StarPayload
+  let rawPayload: unknown
   try {
-    payload = JSON.parse(rawBody.toString('utf8')) as StarPayload
+    rawPayload = JSON.parse(rawBody.toString('utf8'))
   } catch {
     res.writeHead(400, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ error: 'Invalid JSON' }))
     return
   }
 
-  if (payload.action !== 'created') {
+  const payloadParsed = StarCreatedPayload.safeParse(rawPayload)
+  if (!payloadParsed.success) {
+    // star event with action other than 'created', or unexpected shape
     res.writeHead(204)
     res.end()
     return
   }
 
-  const { repository } = payload
+  const { repository } = payloadParsed.data
   const body = JSON.stringify({
     name: repository.full_name,
     githubRepoUrl: repository.html_url,
     description: repository.description,
   })
 
-  const upstream = await fetch(TARGET_URL, {
+  const upstream = await fetch(env.TARGET_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body,
