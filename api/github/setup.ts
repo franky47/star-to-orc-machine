@@ -1,4 +1,7 @@
+import { z } from 'zod'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+
+const installationIdSchema = z.coerce.number().int().positive()
 
 /**
  * Setup URL handler for the GitHub App installation flow.
@@ -16,7 +19,10 @@ export default function handler(
     req.url ?? '/',
     `http://${req.headers.host ?? 'localhost'}`,
   )
-  const installationId = url.searchParams.get('installation_id')
+  const parsedId = installationIdSchema.safeParse(
+    url.searchParams.get('installation_id'),
+  )
+  const installationId = parsedId.success ? String(parsedId.data) : null
   const setupAction = url.searchParams.get('setup_action') ?? 'install'
 
   const heading =

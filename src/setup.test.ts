@@ -53,7 +53,14 @@ describe('setup handler', () => {
     expect(body).toContain('✅ App installed!')
     expect(body).not.toContain('Installation ID:')
   })
+
+  it('does not render a non-numeric installation_id to prevent XSS', async () => {
+    const res = await fetch(
+      `${server.url}/api/github/setup?installation_id=%3Cscript%3Ealert(1)%3C%2Fscript%3E`,
+    )
+    expect(res.status).toBe(200)
+    const body = await res.text()
+    expect(body).not.toContain('<script>')
+    expect(body).not.toContain('Installation ID:')
+  })
 })
-
-
-

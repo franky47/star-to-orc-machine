@@ -63,13 +63,13 @@ describe('handler – payload mapping', () => {
     return `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`
   }
 
-  function makeStarPayload(action = 'created') {
+  function makeStarPayload(action = 'created', description: string | null = 'A cool repo') {
     return {
       action,
       repository: {
         full_name: 'owner/my-repo',
         html_url: 'https://github.com/owner/my-repo',
-        description: 'A cool repo',
+        description,
       },
     }
   }
@@ -119,15 +119,17 @@ describe('handler – payload mapping', () => {
       'x-hub-signature-256': 'sha256=badsignature',
     })
     expect(res.status).toBe(401)
+    expect(await res.json()).toEqual({ error: 'Invalid signature' })
   })
 
-  it('returns 202 for non-star events', async () => {
+  it('returns 400 for unknown event types', async () => {
     const body = JSON.stringify({ action: 'created' })
     const res = await post(body, {
       'x-github-event': 'push',
       'x-hub-signature-256': sign(body),
     })
-    expect(res.status).toBe(202)
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'Missing required headers' })
   })
 
   it('returns 200 for installation event', async () => {
@@ -137,6 +139,7 @@ describe('handler – payload mapping', () => {
       'x-hub-signature-256': sign(body),
     })
     expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ message: 'Installation event received' })
   })
 
   it('returns 200 for installation_repositories event', async () => {
@@ -146,6 +149,7 @@ describe('handler – payload mapping', () => {
       'x-hub-signature-256': sign(body),
     })
     expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ message: 'Installation event received' })
   })
 
   it('returns 204 for star events with action != created', async () => {
@@ -174,10 +178,34 @@ describe('handler – payload mapping', () => {
     })
 
     expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ success: true })
     expect(capturedBody).toEqual({
       name: 'owner/my-repo',
       githubRepoUrl: 'https://github.com/owner/my-repo',
       description: 'A cool repo',
+    })
+  })
+
+  it('uses "No description provided" when description is null', async () => {
+    let capturedBody: unknown = null
+    mswServer.use(
+      http.post(targetUrl, async ({ request }) => {
+        capturedBody = await request.json()
+        return HttpResponse.json({ success: true })
+      }),
+    )
+
+    const body = JSON.stringify(makeStarPayload('created', null))
+    const res = await post(body, {
+      'x-github-event': 'star',
+      'x-hub-signature-256': sign(body),
+    })
+
+    expect(res.status).toBe(200)
+    expect(capturedBody).toEqual({
+      name: 'owner/my-repo',
+      githubRepoUrl: 'https://github.com/owner/my-repo',
+      description: 'No description provided',
     })
   })
 
@@ -192,5 +220,6 @@ describe('handler – payload mapping', () => {
       'x-hub-signature-256': sign(body),
     })
     expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: 'Upstream error' })
   })
 })
