@@ -67,6 +67,13 @@ export default async function handler(
     return
   }
 
+  // GitHub App lifecycle events – acknowledge but take no action.
+  if (event === 'installation' || event === 'installation_repositories') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ message: 'Installation event received' }))
+    return
+  }
+
   if (event !== 'star') {
     res.writeHead(202, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ message: 'Event ignored' }))

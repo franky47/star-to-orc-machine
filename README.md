@@ -8,9 +8,10 @@ When you ⭐ a GitHub repository, this app's webhook receives the event and forw
 
 ## How it works
 
-1. A GitHub App is installed on your account.
-2. The app is configured to send `star` webhook events to this Vercel deployment.
-3. Vercel runs `api/github/webhook.ts` which verifies the signature and POSTs the repository details to the review API.
+1. A GitHub App is installed on your account (via the GitHub App setup below).
+2. GitHub redirects you to `/api/github/setup` to confirm the installation.
+3. Whenever you ⭐ star a repository, GitHub sends a `star` webhook event to `/api/github/webhook`.
+4. The handler verifies the signature and POSTs the repository details to the review API.
 
 ---
 
@@ -33,11 +34,15 @@ When you ⭐ a GitHub repository, this app's webhook receives the event and forw
 2. Fill in:
    - **GitHub App name** – anything you like.
    - **Homepage URL** – your Vercel deployment URL (e.g. `https://star-to-orc-machine.vercel.app`).
+   - **Setup URL** – `https://<your-deployment>.vercel.app/api/github/setup` *(tick "Redirect on update" as well)*.
    - **Webhook URL** – `https://<your-deployment>.vercel.app/api/github/webhook`.
-   - **Webhook secret** – a random string; save it, you will use it as `GITHUB_WEBHOOK_SECRET`.
-3. Under **Subscribe to events**, tick **Star**.
-4. Under **Where can this GitHub App be installed?** choose **Only on this account**.
-5. Create the app, then install it on your account.
+   - **Webhook secret** – a random string; copy it, you will add it as `GITHUB_WEBHOOK_SECRET`.
+3. Under **Permissions**, no extra permissions are required (we only receive events).
+4. Under **Subscribe to events**, tick **Star** and **Installation** (so GitHub App lifecycle events are delivered).
+5. Under **Where can this GitHub App be installed?** choose **Only on this account**.
+6. Click **Create GitHub App**.
+7. On the app's page, click **Install App** → select your account → **Install**.
+8. You will be redirected to `/api/github/setup` – the page confirms the installation is live.
 
 ---
 
@@ -63,16 +68,22 @@ GITHUB_WEBHOOK_SECRET=your-secret-here
 
 ---
 
-## Webhook endpoint
+## API endpoints
 
-`POST /api/github/webhook`
+### `POST /api/github/webhook`
+
+Receives GitHub App webhook deliveries.
 
 | Response | Condition |
 |---|---|
-| `200 OK` | `star` event with `action: created` forwarded successfully. |
-| `202 Accepted` | Event type is not `star` – ignored. |
+| `200 OK` | `star` event with `action: created` forwarded successfully, **or** `installation` / `installation_repositories` lifecycle event acknowledged. |
+| `202 Accepted` | Event type is not handled – ignored. |
 | `204 No Content` | `star` event with `action` other than `created` – ignored. |
 | `400 Bad Request` | Request body is not valid JSON. |
 | `401 Unauthorized` | `X-Hub-Signature-256` is missing or invalid. |
 | `405 Method Not Allowed` | Request method is not `POST`. |
 | `502 Bad Gateway` | Upstream review API returned an error. |
+
+### `GET /api/github/setup`
+
+Setup URL for the GitHub App installation flow. GitHub redirects here after a user installs or updates the app, passing `installation_id` and `setup_action` as query parameters. Returns a confirmation HTML page.

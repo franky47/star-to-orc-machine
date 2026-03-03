@@ -134,6 +134,28 @@ describe('handler – payload mapping', () => {
     expect((res as unknown as { statusCode: number }).statusCode).toBe(202)
   })
 
+  it('returns 200 for installation event', async () => {
+    const { default: handler } = await import('../api/github/webhook.js')
+    const body = JSON.stringify({ action: 'created', installation: { id: 1 } })
+    const [req, res] = buildReqRes(body, {
+      'x-github-event': 'installation',
+      'x-hub-signature-256': signPayload(body),
+    })
+    await handler(req, res)
+    expect((res as unknown as { statusCode: number }).statusCode).toBe(200)
+  })
+
+  it('returns 200 for installation_repositories event', async () => {
+    const { default: handler } = await import('../api/github/webhook.js')
+    const body = JSON.stringify({ action: 'added' })
+    const [req, res] = buildReqRes(body, {
+      'x-github-event': 'installation_repositories',
+      'x-hub-signature-256': signPayload(body),
+    })
+    await handler(req, res)
+    expect((res as unknown as { statusCode: number }).statusCode).toBe(200)
+  })
+
   it('returns 204 for star events with action != created', async () => {
     const { default: handler } = await import('../api/github/webhook.js')
     const body = JSON.stringify(makeStarPayload('deleted'))
