@@ -1,7 +1,7 @@
-import { z } from 'zod'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { z } from 'zod'
+import { readRawBody, verifySignature } from '../../src/crypto.js'
 import { env } from '../../src/env.js'
-import { verifySignature, readRawBody } from '../../src/crypto.js'
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -9,7 +9,11 @@ import { verifySignature, readRawBody } from '../../src/crypto.js'
 
 const webhookHeaders = z.object({
   'x-hub-signature-256': z.string().max(71),
-  'x-github-event': z.enum(['star', 'installation', 'installation_repositories']),
+  'x-github-event': z.enum([
+    'star',
+    'installation',
+    'installation_repositories',
+  ]),
 })
 
 const starCreatedPayload = z.object({
@@ -94,19 +98,32 @@ export default async function handler(
     description: repository.description || 'No description provided',
   })
 
-  const upstream = await fetch(env.TARGET_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body,
-  })
+  try {
+    console.info('Forwarding star event to upstream:', env.TARGET_URL, body)
 
-  if (!upstream.ok) {
-    console.error('Upstream error:', upstream.status, upstream.statusText)
+    const upstream = await fetch(env.TARGET_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    })
+
+    if (!upstream.ok) {
+      console.error(
+        'Upstream error:',
+        upstream.status,
+        upstream.statusText,
+        await upstream.text(),
+      )
+      res.writeHead(502, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Upstream error' }))
+      return
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ success: true }))
+  } catch (error) {
+    console.error('Network error:', error)
     res.writeHead(502, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ error: 'Upstream error' }))
-    return
+    res.end(JSON.stringify({ error: 'Network error' }))
   }
-
-  res.writeHead(200, { 'Content-Type': 'application/json' })
-  res.end(JSON.stringify({ success: true }))
 }
