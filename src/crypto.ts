@@ -1,5 +1,4 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import type { IncomingMessage } from 'node:http'
 
 /** Verify the X-Hub-Signature-256 header against the raw payload. */
 export function verifySignature(
@@ -16,14 +15,4 @@ export function verifySignature(
   } catch {
     return false
   }
-}
-
-/** Read the full request body as a Buffer. */
-export function readRawBody(req: IncomingMessage): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    req.on('data', (chunk: Buffer) => chunks.push(chunk))
-    req.on('end', () => resolve(Buffer.concat(chunks)))
-    req.on('error', reject)
-  })
 }
