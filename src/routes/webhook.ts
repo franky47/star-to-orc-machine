@@ -72,6 +72,11 @@ export const webhookRoutes = new Elysia()
         description: body.repository.description || 'No description provided',
       }
       try {
+        console.info(
+          'Forwarding star event to upstream:',
+          payload,
+          env.TARGET_URL,
+        )
         const upstream = await fetch(env.TARGET_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
